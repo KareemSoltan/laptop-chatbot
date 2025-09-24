@@ -1,49 +1,28 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
+from fastapi import FastAPI, Body
+from transformers import pipeline
 
-MODEL_NAME = "distilgpt2"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+app = FastAPI(title="Laptop Assistant (GPT-2)")
 
-app = FastAPI(title="Simple Chatbot API")
+generator = pipeline("text-generation", model="gpt2")
 
-class ChatRequest(BaseModel):
-    message: str
+SYSTEM_PROMPT = """
+You are Laptop Assistant.
+Answer laptop questions, compare models, and give concise recommendations.
+You are a helpful assistant specialized in laptops and notebook computers.
+You can answer questions about laptop specifications, compare different models, suggest laptops for specific needs, and provide concise, clear recommendations.
+If you need more information from the user, ask clarifying questions.
+Keep your answers factual and avoid speculation.
 
-chat_history = []
-
-def generate_response(user_input: str, max_length=100):
-    chat_history.append(f"User: {user_input}")
-    input_text = "\n".join(chat_history) + "\nBot:"
-    
-    inputs = tokenizer(input_text, return_tensors="pt")
-    
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_length=len(inputs["input_ids"][0]) + max_length,
-            pad_token_id=tokenizer.eos_token_id,
-            do_sample=True,
-            top_p=0.9,
-            temperature=0.7
-        )
-    
-    response_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    bot_reply = response_text.split("Bot:")[-1].strip()
-    
-    chat_history.append(f"Bot: {bot_reply}")
-    return bot_reply
+"""
 
 @app.post("/chat")
-def chat(req: ChatRequest):
-    try:
-        reply = generate_response(req.message)
-        return {"reply": reply}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the Simple Chatbot API!"}
+def chat(user_input: str = Body(..., embed=True)):
+    prompt = f"{SYSTEM_PROMPT}\nUser: {user_input}\nAssistant:"
+    response = generator(
+        prompt,
+        max_length=150,
+        num_return_sequences=1,
+        do_sample=True,
+        temperature=0.7
+    )
+    return {"user": user_input, "assistant": response[0]["generated_text"]}
